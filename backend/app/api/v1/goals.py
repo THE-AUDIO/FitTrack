@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
-from app.models.goal import Goal, GoalStatusEnum
+from app.models.goal import Goal
 from app.schemas.goal import GoalCreate, GoalUpdate, GoalResponse
 
 router = APIRouter(prefix="/api/goals", tags=["goals"])

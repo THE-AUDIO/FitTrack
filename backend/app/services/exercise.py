@@ -2,7 +2,6 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.exercise import Exercise
-from app.models.user import User
 from app.schemas.exercise import ExerciseCreate, ExerciseUpdate
 
 SEED_EXERCISES = [
@@ -24,7 +23,7 @@ class ExerciseService:
         self.db = db
 
     def seed_defaults(self):
-        existing = self.db.query(Exercise).filter(Exercise.is_default == True).count()
+        existing = self.db.query(Exercise).filter(Exercise.is_default).count()
         if existing > 0:
             return
         for ex in SEED_EXERCISES:
@@ -34,7 +33,7 @@ class ExerciseService:
     def list_exercises(self, user_id: str) -> list[Exercise]:
         return (
             self.db.query(Exercise)
-            .filter((Exercise.is_default == True) | (Exercise.created_by == user_id))
+            .filter((Exercise.is_default) | (Exercise.created_by == user_id))
             .all()
         )
 

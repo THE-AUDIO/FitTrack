@@ -1,5 +1,4 @@
-from app.models.workout import WorkoutSession, WorkoutExercise, ExerciseSet
-from app.models.exercise import Exercise
+from app.models.workout import WorkoutSession, WorkoutExercise
 
 CADENCE_MAP = {
     "Musculation": 20,

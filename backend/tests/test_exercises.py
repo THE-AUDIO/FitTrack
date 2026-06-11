@@ -16,7 +16,7 @@ def test_create_custom_exercise(client, auth_headers):
     data = res.json()
     assert data["name"] == "Test Exercise"
     assert data["met_value"] == 4.5
-    assert data["is_default"] == False
+    assert not data["is_default"]
 
 
 def test_get_exercise(client, auth_headers):

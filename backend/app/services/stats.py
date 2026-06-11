@@ -123,7 +123,7 @@ class StatsService:
             .filter(
                 WorkoutSession.user_id == user_id,
                 WorkoutExercise.exercise_id == exercise_id,
-                ExerciseSet.completed == True,
+                ExerciseSet.completed,
             )
             .group_by(WorkoutSession.date)
             .order_by(WorkoutSession.date)

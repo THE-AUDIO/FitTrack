@@ -4,7 +4,11 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 
 from app.core.database import Base
-from app.models import *
+from app.models.user import User
+from app.models.exercise import Exercise
+from app.models.workout import WorkoutSession, WorkoutExercise, ExerciseSet
+from app.models.nutrition import NutritionSuggestion
+from app.models.goal import Goal
 
 config = context.config
 if config.config_file_name is not None:

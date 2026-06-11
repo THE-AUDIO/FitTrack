@@ -2,7 +2,7 @@ import json
 import os
 from typing import Optional
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
@@ -70,7 +70,7 @@ class NutritionService:
             ],
             "meal_plan": {
                 "timing": "Dans les 30-60 min post-séance (fenêtre anabolique)",
-                "snack": f"Banane + poignée d'amandes (~250 kcal)",
+                "snack": "Banane + poignée d'amandes (~250 kcal)",
                 "meal": f"Repas équilibré protéines + glucides complexes (~{int(calories * 0.4)} kcal)",
             },
             "hydration_tip": "Buvez 500ml d'eau dans l'heure suivant l'entraînement. Ajoutez une pincée de sel si vous avez beaucoup transpiré.",
