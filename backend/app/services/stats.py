@@ -65,25 +65,29 @@ class StatsService:
 
     def workouts_per_week(self, user_id: str, weeks: int = 8) -> list[dict]:
         cutoff = date.today() - timedelta(weeks=weeks)
-        results = (
-            self.db.query(
-                func.date_trunc("week", WorkoutSession.date).label("week"),
-                func.count(WorkoutSession.id).label("count"),
-            )
+        sessions = (
+            self.db.query(WorkoutSession.date)
             .filter(
                 WorkoutSession.user_id == user_id,
                 WorkoutSession.date >= cutoff,
             )
-            .group_by("week")
-            .order_by("week")
             .all()
         )
-        return [{"week": str(r.week), "count": r.count} for r in results]
+        from collections import Counter
+        week_counts: Counter = Counter()
+        for (session_date,) in sessions:
+            iso_year, iso_week, _ = session_date.isocalendar()
+            week_key = f"{iso_year}-W{iso_week:02d}"
+            week_counts[week_key] += 1
+        return [
+            {"week": week, "count": count}
+            for week, count in sorted(week_counts.items())
+        ]
 
     def volume_by_muscle(self, user_id: str) -> list[dict]:
         results = (
             self.db.query(
-                func.unnest(Exercise.muscle_groups).label("muscle_group"),
+                Exercise.muscle_groups,
                 func.coalesce(func.sum(ExerciseSet.reps), 0).label("total_reps"),
                 func.count(ExerciseSet.id).label("total_sets"),
             )
@@ -92,13 +96,20 @@ class StatsService:
             .join(Exercise, Exercise.id == WorkoutExercise.exercise_id)
             .join(ExerciseSet, ExerciseSet.workout_exercise_id == WorkoutExercise.id)
             .filter(WorkoutSession.user_id == user_id)
-            .group_by("muscle_group")
+            .group_by(Exercise.muscle_groups)
             .order_by(func.sum(ExerciseSet.reps).desc())
             .all()
         )
+        output: dict[str, dict] = {}
+        for mg_json, total_reps, total_sets in results:
+            for muscle in (mg_json or []):
+                if muscle not in output:
+                    output[muscle] = {"total_reps": 0, "total_sets": 0}
+                output[muscle]["total_reps"] += total_reps
+                output[muscle]["total_sets"] += total_sets
         return [
-            {"muscle_group": r.muscle_group, "total_reps": r.total_reps, "total_sets": r.total_sets}
-            for r in results
+            {"muscle_group": k, **v}
+            for k, v in sorted(output.items(), key=lambda x: x[1]["total_reps"], reverse=True)
         ]
 
     def progress(self, user_id: str, exercise_id: str) -> list[dict]:

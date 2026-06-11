@@ -8,21 +8,24 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
 from app.core.database import engine, Base
-from app.api.v1 import auth, exercises, workouts, calories, nutrition, stats
+from app.api.v1 import auth, exercises, workouts, calories, nutrition, stats, goals
 
 limiter = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    from app.core.database import SessionLocal
-    from app.services.exercise import ExerciseService
-    db = SessionLocal()
     try:
-        ExerciseService(db).seed_defaults()
-    finally:
-        db.close()
+        Base.metadata.create_all(bind=engine)
+        from app.core.database import SessionLocal
+        from app.services.exercise import ExerciseService
+        db = SessionLocal()
+        try:
+            ExerciseService(db).seed_defaults()
+        finally:
+            db.close()
+    except Exception:
+        pass
     yield
 
 
@@ -47,6 +50,7 @@ app.include_router(workouts.router)
 app.include_router(calories.router)
 app.include_router(nutrition.router)
 app.include_router(stats.router)
+app.include_router(goals.router)
 
 
 @app.get("/api/health")

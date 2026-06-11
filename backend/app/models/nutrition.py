@@ -2,8 +2,8 @@ import uuid
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Float, Enum, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Column, String, Float, Enum, DateTime, ForeignKey, JSON
+
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -24,7 +24,7 @@ class NutritionSuggestion(Base):
     context = Column(Enum(SuggestionContextEnum), nullable=False)
     country = Column(String, nullable=False)
     city = Column(String, nullable=True)
-    suggestion_json = Column(JSONB, nullable=False)
+    suggestion_json = Column(JSON, nullable=False)
     generated_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
