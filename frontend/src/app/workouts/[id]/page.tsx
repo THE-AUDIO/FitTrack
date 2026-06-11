@@ -3,7 +3,7 @@
 import { useAuthStore } from "@/store/auth-store"
 import { useRouter, useParams } from "next/navigation"
 import { useEffect, useState } from "react"
-import { useQuery, useMutation } from "@tanstack/react-query"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { motion } from "framer-motion"
 import {
   ArrowLeft,
@@ -13,22 +13,36 @@ import {
   ChefHat,
   Brain,
   Loader2,
+  Trash2,
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/toast"
+import { ConfirmDialog } from "@/components/ui/dialog"
 
 export default function WorkoutDetailPage() {
   const { user, isLoading: authLoading } = useAuthStore()
   const router = useRouter()
   const params = useParams()
   const { showToast } = useToast()
+  const queryClient = useQueryClient()
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
 
   useEffect(() => {
     if (!authLoading && !user) router.push("/login")
   }, [user, authLoading, router])
+
+  const handleDelete = async () => {
+    try {
+      await apiClient(`/api/workouts/${params.id}`, { method: "DELETE" })
+      queryClient.invalidateQueries({ queryKey: ["workouts"] })
+      router.push("/workouts")
+    } catch {
+      showToast("Erreur lors de la suppression", "error")
+    }
+  }
 
   const { data: workout, isLoading } = useQuery({
     queryKey: ["workout", params.id],
@@ -74,14 +88,16 @@ export default function WorkoutDetailPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-4xl">
-      <Button
-        variant="ghost"
-        onClick={() => router.push("/workouts")}
-        className="mb-4"
-      >
-        <ArrowLeft className="mr-2 h-4 w-4" />
-        Retour
-      </Button>
+      <div className="mb-4 flex items-center justify-between">
+        <Button variant="ghost" onClick={() => router.push("/workouts")}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Retour
+        </Button>
+        <Button variant="ghost" onClick={() => setShowDeleteDialog(true)} className="text-red-400 hover:text-red-300 hover:bg-red-500/10">
+          <Trash2 className="mr-2 h-4 w-4" />
+          Supprimer
+        </Button>
+      </div>
 
       <div className="mb-8">
         <h1 className="text-2xl font-bold tracking-tight">{w.title}</h1>
@@ -235,6 +251,17 @@ export default function WorkoutDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={showDeleteDialog}
+        onClose={() => setShowDeleteDialog(false)}
+        onConfirm={handleDelete}
+        title="Supprimer la séance"
+        description="Cette action est irréversible. Tous les exercices et séries associés seront supprimés."
+        confirmLabel="Supprimer"
+        cancelLabel="Annuler"
+        variant="danger"
+      />
     </div>
   )
 }

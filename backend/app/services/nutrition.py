@@ -1,7 +1,6 @@
 import json
 from typing import Optional
 
-from anthropic import Anthropic
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -13,7 +12,68 @@ from app.models.nutrition import NutritionSuggestion, SuggestionContextEnum
 class NutritionService:
     def __init__(self, db: Session):
         self.db = db
-        self.client = Anthropic(api_key=settings.anthropic_api_key) if settings.anthropic_api_key else None
+        self._gemini_client = None
+        self._groq_client = None
+        if settings.gemini_api_key:
+            try:
+                from google import genai
+                self._gemini_client = genai.Client(api_key=settings.gemini_api_key)
+            except ImportError:
+                pass
+        if settings.groq_api_key:
+            try:
+                from groq import Groq
+                self._groq_client = Groq(api_key=settings.groq_api_key)
+            except ImportError:
+                pass
+
+    def _call_gemini(self, prompt: str) -> Optional[dict]:
+        try:
+            response = self._gemini_client.models.generate_content(
+                model=settings.gemini_model,
+                contents=prompt,
+                config={"temperature": 0.7, "max_output_tokens": 1000},
+            )
+            content = response.text.strip()
+            return self._parse_json_response(content)
+        except Exception:
+            return None
+
+    def _call_groq(self, prompt: str) -> Optional[dict]:
+        try:
+            response = self._groq_client.chat.completions.create(
+                model=settings.groq_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=1000,
+            )
+            content = response.choices[0].message.content.strip()
+            return self._parse_json_response(content)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _parse_json_response(content: str) -> dict:
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0]
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0]
+        return json.loads(content.strip())
+
+    def _fallback_suggestion(self, calories: int, locale_str: str) -> dict:
+        return {
+            "recovery_foods": [
+                {"name": "Banane", "reason": "Glucides rapides + potassium pour la récupération musculaire"},
+                {"name": "Œufs", "reason": "Protéines complètes pour la réparation des tissus"},
+                {"name": "Eau de coco", "reason": "Hydratation et électrolytes naturels"},
+            ],
+            "meal_plan": {
+                "timing": "Dans les 30-60 min post-séance (fenêtre anabolique)",
+                "snack": f"Banane + poignée d'amandes (~250 kcal)",
+                "meal": f"Repas équilibré protéines + glucides complexes (~{int(calories * 0.4)} kcal)",
+            },
+            "hydration_tip": "Buvez 500ml d'eau dans l'heure suivant l'entraînement. Ajoutez une pincée de sel si vous avez beaucoup transpiré.",
+        }
 
     def suggest(
         self,
@@ -36,7 +96,7 @@ class NutritionService:
 Location: {locale_str}
 Context: {context}
 
-Provide localized post-workout nutrition suggestions in JSON format:
+Provide localized post-workout nutrition suggestions in JSON format ONLY, no other text:
 {{
   "recovery_foods": [{{"name": "...", "reason": "..."}}],
   "meal_plan": {{"timing": "...", "snack": "...", "meal": "..."}},
@@ -45,39 +105,13 @@ Provide localized post-workout nutrition suggestions in JSON format:
 
 Use local foods from {locale_str}. Be specific and practical."""
 
-        if not self.client:
-            suggestion_json = {
-                "recovery_foods": [
-                    {"name": "Banane", "reason": "Glucides rapides + potassium"},
-                    {"name": "Œufs", "reason": "Protéines complètes"},
-                ],
-                "meal_plan": {
-                    "timing": "Dans les 30-60 min post-séance",
-                    "snack": "Banane + eau (~120 kcal)",
-                    "meal": f"Repas équilibré (~{int(calories * 0.4)} kcal)",
-                },
-                "hydration_tip": "Buvez 500ml d'eau dans l'heure.",
-            }
-        else:
-            try:
-                message = self.client.messages.create(
-                    model=settings.claude_model,
-                    max_tokens=1000,
-                    temperature=0.7,
-                    system="You are a helpful nutrition expert. Always respond in valid JSON only.",
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                content = message.content[0].text if message.content else "{}"
-                if "```json" in content:
-                    content = content.split("```json")[1].split("```")[0]
-                elif "```" in content:
-                    content = content.split("```")[1].split("```")[0]
-                suggestion_json = json.loads(content.strip())
-            except Exception as e:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"AI service error: {str(e)}",
-                )
+        suggestion_json = None
+        if self._gemini_client:
+            suggestion_json = self._call_gemini(prompt)
+        if suggestion_json is None and self._groq_client:
+            suggestion_json = self._call_groq(prompt)
+        if suggestion_json is None:
+            suggestion_json = self._fallback_suggestion(calories, locale_str)
 
         suggestion = NutritionSuggestion(
             session_id=session_id,

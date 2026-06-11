@@ -2,493 +2,628 @@
 
 import { useAuthStore } from "@/store/auth-store"
 import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
-import { motion } from "framer-motion"
+import { useEffect, useRef, useState, useCallback } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { motion, AnimatePresence } from "framer-motion"
 import {
-  Plus,
-  Trash2,
   Dumbbell,
-  Save,
+  Plus,
+  Check,
+  Clock,
+  Play,
+  Pause,
+  SkipForward,
+  ChevronLeft,
+  ChevronRight,
   Search,
+  List,
   Flame,
 } from "lucide-react"
-import { useForm } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
 import { apiClient } from "@/lib/api"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/toast"
-import { workoutSchema } from "@/lib/validations"
+
+type Phase = "form" | "select" | "active" | "complete"
 
 interface Exercise {
   id: string
   name: string
   category: string
-  muscle_groups: string[]
   met_value: number
 }
 
-interface SetRow {
-  set_number: number
-  reps: number | null
-  weight_kg: number | null
-  duration_seconds: number | null
-  completed: boolean
+interface PlannedExercise {
+  exercise: Exercise
+  numSets: number
+  restSeconds: number
+  sets: { reps: number | null; completed: boolean }[]
 }
 
-interface ExerciseEntry {
-  exercise_id: string
-  exercise_name: string
-  met_value: number
-  category: string
-  order_index: number
-  rest_seconds: number
-  sets: SetRow[]
+const DEFAULT_REST = 45
+
+function formatTime(seconds: number) {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${s.toString().padStart(2, "0")}`
 }
 
 export default function NewWorkoutPage() {
-  const { user, isLoading } = useAuthStore()
+  const { user, isLoading: authLoading } = useAuthStore()
   const router = useRouter()
+  const queryClient = useQueryClient()
   const { showToast } = useToast()
-  const [exercises, setExercises] = useState<ExerciseEntry[]>([])
-  const [search, setSearch] = useState("")
-  const [selectedCategory, setSelectedCategory] = useState<string>("all")
+
+  const [phase, setPhase] = useState<Phase>("form")
+  const [title, setTitle] = useState("")
+  const [date, setDate] = useState(new Date().toISOString().split("T")[0])
+  const [duration, setDuration] = useState(30)
+  const [notes, setNotes] = useState("")
+
+  const [plannedExercises, setPlannedExercises] = useState<PlannedExercise[]>([])
+  const [currentExIndex, setCurrentExIndex] = useState(0)
+  const [currentSet, setCurrentSet] = useState(1)
+
+  const [timerValue, setTimerValue] = useState(DEFAULT_REST)
+  const [timerRunning, setTimerRunning] = useState(false)
+  const [showRepInput, setShowRepInput] = useState(false)
+  const [currentReps, setCurrentReps] = useState<number | null>(null)
   const [isSaving, setIsSaving] = useState(false)
 
-  const { data: allExercises } = useQuery<Exercise[]>({
+  const [search, setSearch] = useState("")
+  const [categoryFilter, setCategoryFilter] = useState("")
+
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!authLoading && !user) router.push("/login")
+  }, [user, authLoading, router])
+
+  const { data: allExercises } = useQuery({
     queryKey: ["exercises"],
-    queryFn: () => apiClient("/api/exercises"),
+    queryFn: () => apiClient<Exercise[]>("/api/exercises"),
     enabled: !!user,
   })
 
+  const userWeight = user?.weight_kg ?? 70
+
+  const currentExercise = plannedExercises[currentExIndex]
+  const totalSets = currentExercise?.numSets ?? 0
+  const isLastSet = currentSet >= totalSets
+  const isLastExercise = currentExIndex >= plannedExercises.length - 1
+
+  const categories = allExercises
+    ? Array.from(new Set(allExercises.map((e) => e.category)))
+    : []
+
+  const filteredExercises = allExercises?.filter((e) => {
+    const matchName = e.name.toLowerCase().includes(search.toLowerCase())
+    const matchCategory = !categoryFilter || e.category === categoryFilter
+    const notAdded = !plannedExercises.some((p) => p.exercise.id === e.id)
+    return matchName && matchCategory && notAdded
+  })
+
+  const startTimer = useCallback(() => {
+    setShowRepInput(false)
+    setTimerRunning(true)
+  }, [])
+
+  const pauseTimer = useCallback(() => {
+    setTimerRunning(false)
+  }, [])
+
+  const skipTimer = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    setTimerRunning(false)
+    setShowRepInput(true)
+    setCurrentReps(null)
+    setTimeout(() => inputRef.current?.focus(), 100)
+  }, [])
+
+  const confirmReps = useCallback(() => {
+    if (currentReps === null || currentReps < 0) return
+
+    setPlannedExercises((prev) => {
+      const updated = [...prev]
+      const ex = { ...updated[currentExIndex] }
+      const sets = [...ex.sets]
+      sets[currentSet - 1] = { reps: currentReps, completed: true }
+      ex.sets = sets
+      updated[currentExIndex] = ex
+      return updated
+    })
+
+    if (isLastSet) {
+      if (isLastExercise) {
+        setShowRepInput(false)
+        setTimerRunning(false)
+        setPhase("complete")
+      } else {
+        setCurrentExIndex((i) => i + 1)
+        setCurrentSet(1)
+        setTimerValue(DEFAULT_REST)
+        setShowRepInput(false)
+        setTimerRunning(false)
+      }
+    } else {
+      setCurrentSet((s) => s + 1)
+      setTimerValue(DEFAULT_REST)
+      setShowRepInput(false)
+      setTimerRunning(true)
+    }
+
+    setCurrentReps(null)
+  }, [currentReps, currentExIndex, currentSet, isLastSet, isLastExercise])
+
   useEffect(() => {
-    if (!isLoading && !user) router.push("/login")
-  }, [user, isLoading, router])
+    if (timerRunning) {
+      timerRef.current = setInterval(() => {
+        setTimerValue((prev) => {
+          if (prev <= 1) {
+            if (timerRef.current) clearInterval(timerRef.current)
+            setTimerRunning(false)
+            setShowRepInput(true)
+            setCurrentReps(null)
+            setTimeout(() => inputRef.current?.focus(), 100)
+            return 0
+          }
+          return prev - 1
+        })
+      }, 1000)
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [timerRunning])
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm({
-    resolver: zodResolver(workoutSchema),
-    defaultValues: {
-      title: "",
-      date: new Date().toISOString().split("T")[0],
-      duration_minutes: 30,
-      notes: "",
-    },
-  })
+  const currentCalories = (() => {
+    let total = 0
+    for (const pe of plannedExercises) {
+      const cadence = pe.exercise.category === "Cardio" ? 40 : pe.exercise.category === "HIIT" ? 30 : 20
+      const totalReps = pe.sets.reduce((sum, s) => sum + (s.reps ?? 0), 0)
+      const numSets = pe.numSets
+      const durationHours = (totalReps / cadence + numSets * pe.restSeconds / 60) / 60
+      total += pe.exercise.met_value * userWeight * durationHours
+    }
+    return Math.round(total)
+  })()
 
-  const filteredExercises = (allExercises || []).filter((ex) => {
-    const matchesSearch = ex.name
-      .toLowerCase()
-      .includes(search.toLowerCase())
-    const matchesCategory =
-      selectedCategory === "all" || ex.category === selectedCategory
-    return matchesSearch && matchesCategory
-  })
-
-  const categories = ["all", ...Array.from(new Set((allExercises || []).map((e: any) => e.category)))]
-
-  const addExercise = (ex: Exercise) => {
-    setExercises((prev) => [
+  const handleAddExercise = (ex: Exercise, numSets: number) => {
+    const sets = Array.from({ length: numSets }, () => ({
+      reps: null as number | null,
+      completed: false,
+    }))
+    setPlannedExercises((prev) => [
       ...prev,
-      {
-        exercise_id: ex.id,
-        exercise_name: ex.name,
-        met_value: ex.met_value,
-        category: ex.category,
-        order_index: prev.length,
-        rest_seconds: 60,
-        sets: [{ set_number: 1, reps: null, weight_kg: null, duration_seconds: null, completed: true }],
-      },
+      { exercise: ex, numSets, restSeconds: DEFAULT_REST, sets },
     ])
   }
 
-  const removeExercise = (index: number) => {
-    setExercises((prev) => prev.filter((_, i) => i !== index))
+  const handleStartWorkout = () => {
+    if (plannedExercises.length === 0) return
+    setCurrentExIndex(0)
+    setCurrentSet(1)
+    setTimerValue(DEFAULT_REST)
+    setPhase("active")
+    startTimer()
   }
 
-  const addSet = (exIndex: number) => {
-    setExercises((prev) => {
-      const updated = [...prev]
-      const currentSets = updated[exIndex].sets
-      updated[exIndex] = {
-        ...updated[exIndex],
-        sets: [
-          ...currentSets,
-          {
-            set_number: currentSets.length + 1,
-            reps: null,
-            weight_kg: null,
-            duration_seconds: null,
-            completed: true,
-          },
-        ],
-      }
-      return updated
-    })
-  }
-
-  const removeSet = (exIndex: number, setIndex: number) => {
-    setExercises((prev) => {
-      const updated = [...prev]
-      updated[exIndex] = {
-        ...updated[exIndex],
-        sets: updated[exIndex].sets.filter((_, i) => i !== setIndex),
-      }
-      return updated
-    })
-  }
-
-  const updateSet = (
-    exIndex: number,
-    setIndex: number,
-    field: keyof SetRow,
-    value: any
-  ) => {
-    setExercises((prev) => {
-      const updated = [...prev]
-      updated[exIndex] = {
-        ...updated[exIndex],
-        sets: updated[exIndex].sets.map((s, i) =>
-          i === setIndex ? { ...s, [field]: value } : s
-        ),
-      }
-      return updated
-    })
-  }
-
-  const calculateLiveCalories = (): number => {
-    const userWeight = user?.weight_kg || 70
-    return exercises.reduce((total, ex) => {
-      const totalReps = ex.sets.reduce((sum, s) => sum + (s.reps || 0), 0)
-      const numSets = ex.sets.length
-      const cadence = ex.category === "Cardio" ? 40 : ex.category === "HIIT" ? 30 : 20
-      const durationHours =
-        (totalReps / cadence + numSets * (ex.rest_seconds || 60) / 60) / 60
-      return total + ex.met_value * userWeight * durationHours
-    }, 0)
-  }
-
-  const onSubmit = async (formData: any) => {
-    if (exercises.length === 0) {
-      showToast("Ajoute au moins un exercice", "error")
-      return
-    }
+  const handleSave = async () => {
     setIsSaving(true)
     try {
       const payload = {
-        ...formData,
-        duration_minutes: Number(formData.duration_minutes),
-        exercises: exercises.map((ex, i) => ({
-          exercise_id: ex.exercise_id,
+        title: title || `Séance du ${new Date(date).toLocaleDateString("fr-FR")}`,
+        date,
+        duration_minutes: duration,
+        notes,
+        exercises: plannedExercises.map((pe, i) => ({
+          exercise_id: pe.exercise.id,
           order_index: i,
-          rest_seconds: ex.rest_seconds,
-          sets: ex.sets.map((s) => ({
-            set_number: s.set_number,
-            reps: s.reps ? Number(s.reps) : null,
-            weight_kg: s.weight_kg ? Number(s.weight_kg) : null,
-            duration_seconds: s.duration_seconds ? Number(s.duration_seconds) : null,
+          rest_seconds: pe.restSeconds,
+          sets: pe.sets.map((s, j) => ({
+            set_number: j + 1,
+            reps: s.reps ?? 0,
+            weight_kg: null,
+            duration_seconds: null,
             completed: s.completed,
           })),
         })),
       }
-      const workout = await apiClient("/api/workouts", {
+
+      const result = await apiClient<any>("/api/workouts", {
         method: "POST",
         body: JSON.stringify(payload),
       })
-      showToast("Séance créée avec succès", "success")
-      router.push(`/workouts/${(workout as any).id}`)
-    } catch (err: any) {
-      showToast(err.message || "Erreur lors de la création", "error")
+
+      queryClient.invalidateQueries({ queryKey: ["workouts"] })
+      showToast("Séance enregistrée !", "success")
+      router.push(`/workouts/${result.id}`)
+    } catch {
+      showToast("Erreur lors de l'enregistrement", "error")
     } finally {
       setIsSaving(false)
     }
   }
 
-  const liveCalories = calculateLiveCalories()
+  if (authLoading || !user) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    )
+  }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold tracking-tight">
-          Nouvelle séance
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Configure ta séance et enregistre chaque série
-        </p>
-      </div>
-
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <div className="mb-8 grid gap-4 sm:grid-cols-3">
-          <div className="space-y-2">
-            <Label htmlFor="title">Titre de la séance</Label>
-            <Input
-              id="title"
-              placeholder="Pectoraux & Triceps"
-              {...register("title")}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="date">Date</Label>
-            <Input id="date" type="date" {...register("date")} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="duration_minutes">Durée (minutes)</Label>
-            <Input
-              id="duration_minutes"
-              type="number"
-              {...register("duration_minutes", { valueAsNumber: true })}
-            />
-          </div>
-        </div>
-
-        {liveCalories > 0 && (
-          <div className="mb-6 inline-flex items-center gap-2 rounded-lg bg-orange-500/10 px-4 py-2 text-sm text-orange-400">
-            <Flame className="h-4 w-4" />
-            Estimation calories live : {Math.round(liveCalories)} kcal
-          </div>
-        )}
-
-        <Card className="mb-8">
-          <CardContent className="p-6">
-            <h2 className="mb-4 font-semibold">
-              Ajouter un exercice
-            </h2>
-            <div className="mb-4 flex gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Rechercher un exercice..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9"
+    <div className="p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto">
+      <AnimatePresence mode="wait">
+        {phase === "form" && (
+          <motion.div key="form" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <h1 className="text-2xl font-bold tracking-tight mb-6">Nouvelle séance</h1>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Titre</label>
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Par ex. Séance du matin"
+                  className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                 />
               </div>
-              <div className="flex gap-1 overflow-x-auto">
-                {categories.map((cat) => (
-                  <Button
-                    key={cat}
-                    variant={selectedCategory === cat ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setSelectedCategory(cat)}
-                    className="whitespace-nowrap"
-                  >
-                    {cat === "all" ? "Tous" : cat}
-                  </Button>
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Date</label>
+                <input
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Durée (minutes)</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={duration}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                  className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1.5">Notes (optionnel)</label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+                />
+              </div>
+              <Button onClick={() => setPhase("select")} className="w-full mt-2">
+                Ajouter des exercices
+                <ChevronRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          </motion.div>
+        )}
+
+        {phase === "select" && (
+          <motion.div key="select" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <div className="mb-6 flex items-center gap-3">
+              <button onClick={() => setPhase("form")} className="rounded-md p-1.5 text-muted-foreground hover:text-foreground transition-colors">
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <h1 className="text-xl font-bold tracking-tight">Ajouter des exercices</h1>
+            </div>
+
+            {plannedExercises.length > 0 && (
+              <div className="mb-6 space-y-2">
+                <p className="text-sm font-medium text-muted-foreground">Dans votre séance ({plannedExercises.length}) :</p>
+                {plannedExercises.map((pe, i) => (
+                  <div key={pe.exercise.id} className="flex items-center justify-between rounded-lg bg-primary/5 px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <Dumbbell className="h-4 w-4 text-primary" />
+                      <span className="text-sm font-medium">{pe.exercise.name}</span>
+                      <Badge variant="secondary" className="text-xs">{pe.numSets} séries</Badge>
+                    </div>
+                    <button
+                      onClick={() => setPlannedExercises((prev) => prev.filter((_, j) => j !== i))}
+                      className="text-xs text-red-400 hover:text-red-300"
+                    >
+                      Retirer
+                    </button>
+                  </div>
                 ))}
               </div>
+            )}
+
+            <div className="mb-4 flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Rechercher un exercice..."
+                  className="w-full rounded-lg border border-border bg-background pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                />
+              </div>
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+              >
+                <option value="">Tous</option>
+                {categories.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {filteredExercises.map((ex) => (
-                <Button
+
+            <div className="space-y-2">
+              {filteredExercises?.map((ex) => (
+                <AddExerciseCard
                   key={ex.id}
-                  variant="outline"
-                  className="justify-start gap-2 h-auto py-3"
-                  onClick={() => addExercise(ex)}
-                  type="button"
-                >
-                  <Plus className="h-4 w-4 shrink-0 text-primary" />
-                  <div className="text-left">
-                    <p className="text-sm font-medium">{ex.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      MET {ex.met_value} • {ex.category}
-                    </p>
+                  exercise={ex}
+                  onAdd={handleAddExercise}
+                />
+              ))}
+              {filteredExercises?.length === 0 && (
+                <p className="text-center text-sm text-muted-foreground py-8">
+                  Aucun exercice disponible
+                </p>
+              )}
+            </div>
+
+            {plannedExercises.length > 0 && (
+              <Button onClick={handleStartWorkout} className="w-full mt-6" size="lg">
+                <Play className="mr-2 h-4 w-4" />
+                Commencer l'entraînement
+              </Button>
+            )}
+          </motion.div>
+        )}
+
+        {phase === "active" && currentExercise && (
+          <motion.div key="active" initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} className="text-center">
+            <div className="mb-2 flex items-center justify-between text-sm text-muted-foreground">
+              <span>Exercice {currentExIndex + 1}/{plannedExercises.length}</span>
+              <span>Série {currentSet}/{totalSets}</span>
+            </div>
+
+            <div className="mb-6 h-1.5 w-full rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-300"
+                style={{ width: `${((currentSet - 1) / totalSets) * 100}%` }}
+              />
+            </div>
+
+            <div className="mb-6">
+              <div className="inline-flex items-center justify-center rounded-2xl bg-primary/10 p-4 mb-4">
+                <Dumbbell className="h-8 w-8 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold">{currentExercise.exercise.name}</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                MET {currentExercise.exercise.met_value} — {currentExercise.exercise.category}
+              </p>
+            </div>
+
+            <AnimatePresence mode="wait">
+              {!showRepInput ? (
+                <motion.div key="timer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                  <div className="mb-4">
+                    <p className="text-sm text-muted-foreground mb-2">Récupération</p>
+                    <div className="text-7xl font-bold tracking-tighter tabular-nums mb-4">
+                      {formatTime(timerValue)}
+                    </div>
+                    <div className="flex items-center justify-center gap-3 mb-4">
+                      <button
+                        onClick={() => setTimerValue((v) => Math.max(5, v - 5))}
+                        className="rounded-lg border border-border px-4 py-1.5 text-sm hover:bg-accent transition-colors"
+                      >
+                        -5s
+                      </button>
+                      <button
+                        onClick={() => setTimerValue((v) => v + 5)}
+                        className="rounded-lg border border-border px-4 py-1.5 text-sm hover:bg-accent transition-colors"
+                      >
+                        +5s
+                      </button>
+                    </div>
                   </div>
-                </Button>
+                  <div className="flex items-center justify-center gap-3">
+                    {timerRunning ? (
+                      <Button onClick={pauseTimer} variant="outline" size="lg">
+                        <Pause className="mr-2 h-4 w-4" />
+                        Pause
+                      </Button>
+                    ) : (
+                      <Button onClick={startTimer} variant="outline" size="lg">
+                        <Play className="mr-2 h-4 w-4" />
+                        Reprendre
+                      </Button>
+                    )}
+                    <Button onClick={skipTimer} size="lg">
+                      <SkipForward className="mr-2 h-4 w-4" />
+                      Passer
+                    </Button>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div key="reps" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}>
+                  <p className="text-sm text-muted-foreground mb-2">
+                    Série {currentSet} — Combien de répétitions ?
+                  </p>
+                  <input
+                    ref={inputRef}
+                    type="number"
+                    min={0}
+                    value={currentReps ?? ""}
+                    onChange={(e) => setCurrentReps(e.target.value ? Number(e.target.value) : null)}
+                    onKeyDown={(e) => { if (e.key === "Enter") confirmReps() }}
+                    placeholder="0"
+                    className="w-32 text-center text-5xl font-bold bg-transparent border-b-2 border-primary/50 focus:border-primary outline-none mx-auto mb-6 tabular-nums [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    autoFocus
+                  />
+                  <div className="flex items-center justify-center gap-3">
+                    <Button
+                      onClick={confirmReps}
+                      disabled={currentReps === null || currentReps < 0}
+                      size="lg"
+                    >
+                      <Check className="mr-2 h-4 w-4" />
+                      {isLastSet && isLastExercise ? "Terminer" : isLastSet ? "Exercice suivant" : "Série suivante"}
+                    </Button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {plannedExercises.length > 1 && (
+              <div className="mt-8 pt-6 border-t border-border">
+                <p className="text-xs text-muted-foreground mb-3">À venir :</p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {plannedExercises.map((pe, i) => (
+                    <Badge
+                      key={pe.exercise.id}
+                      variant={i === currentExIndex ? "default" : i < currentExIndex ? "secondary" : "outline"}
+                      className="text-xs"
+                    >
+                      {i < currentExIndex && <Check className="mr-1 h-3 w-3" />}
+                      {pe.exercise.name}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {phase === "complete" && (
+          <motion.div key="complete" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center justify-center rounded-full bg-primary/10 p-4 mb-4">
+                <Check className="h-8 w-8 text-primary" />
+              </div>
+              <h1 className="text-2xl font-bold">Entraînement terminé !</h1>
+              <p className="text-muted-foreground mt-1">Bravo, tu as terminé toutes tes séries.</p>
+            </div>
+
+            <div className="rounded-xl border border-border bg-card p-6 mb-6 space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Exercices</span>
+                <span className="font-medium">{plannedExercises.length}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Séries totales</span>
+                <span className="font-medium">
+                  {plannedExercises.reduce((sum, pe) => sum + pe.numSets, 0)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Calories estimées</span>
+                <span className="font-medium flex items-center gap-1">
+                  <Flame className="h-3.5 w-3.5 text-orange-400" />
+                  {currentCalories} kcal
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2 mb-6">
+              {plannedExercises.map((pe, i) => (
+                <div key={pe.exercise.id} className="rounded-lg border border-border bg-card p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Dumbbell className="h-4 w-4 text-primary" />
+                      <span className="font-medium text-sm">{pe.exercise.name}</span>
+                    </div>
+                    <Badge variant="secondary" className="text-xs">{pe.numSets} séries</Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {pe.sets.map((s, j) => (
+                      <span
+                        key={j}
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs ${
+                          s.completed ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        #{j + 1}
+                        {s.reps !== null && <>({s.reps} rep{s.reps > 1 ? "s" : ""})</>}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
 
-        {exercises.map((ex, exIndex) => (
-          <Card key={exIndex} className="mb-4 card-hover">
-            <CardContent className="p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Dumbbell className="h-4 w-4 text-primary" />
-                  <h3 className="font-semibold">{ex.exercise_name}</h3>
-                  <Badge variant="secondary" className="text-xs">
-                    MET {ex.met_value}
-                  </Badge>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Label className="text-xs">Repos</Label>
-                    <Input
-                      type="number"
-                      value={ex.rest_seconds}
-                      onChange={(e) =>
-                        setExercises((prev) => {
-                          const updated = [...prev]
-                          updated[exIndex].rest_seconds = Number(e.target.value)
-                          return updated
-                        })
-                      }
-                      className="h-8 w-16 text-xs"
-                    />
-                    <span>s</span>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removeExercise(exIndex)}
-                    type="button"
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">
-                        Série
-                      </th>
-                      <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">
-                        Répétitions
-                      </th>
-                      <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">
-                        Poids (kg)
-                      </th>
-                      <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">
-                        Durée (s)
-                      </th>
-                      <th className="py-2 text-left text-xs font-medium text-muted-foreground">
-                        Fait
-                      </th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ex.sets.map((set, setIndex) => (
-                      <tr key={setIndex} className="border-b border-border/50">
-                        <td className="py-2 pr-4">
-                          <span className="font-medium">{set.set_number}</span>
-                        </td>
-                        <td className="py-2 pr-4">
-                          <Input
-                            type="number"
-                            value={set.reps ?? ""}
-                            onChange={(e) =>
-                              updateSet(
-                                exIndex,
-                                setIndex,
-                                "reps",
-                                e.target.value ? Number(e.target.value) : null
-                              )
-                            }
-                            className="h-8 w-20 text-xs"
-                            placeholder="-"
-                          />
-                        </td>
-                        <td className="py-2 pr-4">
-                          <Input
-                            type="number"
-                            step="0.5"
-                            value={set.weight_kg ?? ""}
-                            onChange={(e) =>
-                              updateSet(
-                                exIndex,
-                                setIndex,
-                                "weight_kg",
-                                e.target.value ? Number(e.target.value) : null
-                              )
-                            }
-                            className="h-8 w-20 text-xs"
-                            placeholder="-"
-                          />
-                        </td>
-                        <td className="py-2 pr-4">
-                          <Input
-                            type="number"
-                            value={set.duration_seconds ?? ""}
-                            onChange={(e) =>
-                              updateSet(
-                                exIndex,
-                                setIndex,
-                                "duration_seconds",
-                                e.target.value ? Number(e.target.value) : null
-                              )
-                            }
-                            className="h-8 w-20 text-xs"
-                            placeholder="-"
-                          />
-                        </td>
-                        <td className="py-2">
-                          <input
-                            type="checkbox"
-                            checked={set.completed}
-                            onChange={(e) =>
-                              updateSet(
-                                exIndex,
-                                setIndex,
-                                "completed",
-                                e.target.checked
-                              )
-                            }
-                            className="h-4 w-4 rounded border-border accent-primary"
-                          />
-                        </td>
-                        <td className="py-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeSet(exIndex, setIndex)}
-                            type="button"
-                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => addSet(exIndex)}
-                type="button"
-                className="mt-3"
-              >
-                <Plus className="mr-1 h-3 w-3" />
-                Ajouter une série
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={() => router.push("/workouts")} className="flex-1">
+                <List className="mr-2 h-4 w-4" />
+                Mes séances
               </Button>
-            </CardContent>
-          </Card>
-        ))}
+              <Button onClick={handleSave} disabled={isSaving} className="flex-1">
+                {isSaving ? "Enregistrement..." : "Enregistrer la séance"}
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
 
-        <div className="flex justify-end gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => router.back()}
-          >
-            Annuler
-          </Button>
-          <Button type="submit" disabled={isSaving}>
-            {isSaving ? (
-              "Création..."
-            ) : (
-              <>
-                <Save className="mr-2 h-4 w-4" />
-                Enregistrer la séance
-              </>
-            )}
-          </Button>
+function AddExerciseCard({
+  exercise,
+  onAdd,
+}: {
+  exercise: Exercise
+  onAdd: (ex: Exercise, numSets: number) => void
+}) {
+  const [numSets, setNumSets] = useState(3)
+  const [showForm, setShowForm] = useState(false)
+
+  return (
+    <div className="rounded-lg border border-border bg-card px-4 py-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Dumbbell className="h-4 w-4 text-primary" />
+          <div>
+            <p className="text-sm font-medium">{exercise.name}</p>
+            <p className="text-xs text-muted-foreground">
+              {exercise.category} — MET {exercise.met_value}
+            </p>
+          </div>
         </div>
-      </form>
+        {!showForm ? (
+          <Button size="sm" variant="ghost" onClick={() => setShowForm(true)}>
+            <Plus className="h-4 w-4 mr-1" />
+            Ajouter
+          </Button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setNumSets((n) => Math.max(1, n - 1))}
+                className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent"
+              >
+                -
+              </button>
+              <span className="w-8 text-center text-sm font-medium">{numSets}</span>
+              <button
+                onClick={() => setNumSets((n) => n + 1)}
+                className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent"
+              >
+                +
+              </button>
+            </div>
+            <span className="text-xs text-muted-foreground">séries</span>
+            <Button
+              size="sm"
+              onClick={() => { onAdd(exercise, numSets); setShowForm(false); setNumSets(3) }}
+            >
+              OK
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

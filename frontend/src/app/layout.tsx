@@ -4,6 +4,7 @@ import "./globals.css"
 import { Providers } from "@/components/layout/providers"
 import { Navbar } from "@/components/layout/navbar"
 import { Sidebar } from "@/components/layout/sidebar"
+import { MainWrapper } from "@/components/layout/main-wrapper"
 
 const inter = Inter({ subsets: ["latin"], display: "swap" })
 
@@ -23,9 +24,7 @@ export default function RootLayout({
         <Providers>
           <Navbar />
           <Sidebar />
-          <main className="min-h-screen pt-16 pb-20 lg:pb-0 lg:pl-64">
-            {children}
-          </main>
+          <MainWrapper>{children}</MainWrapper>
         </Providers>
       </body>
     </html>

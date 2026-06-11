@@ -12,7 +12,7 @@ export function Navbar() {
   const pathname = usePathname()
   const router = useRouter()
 
-  if (!user || pathname === "/login" || pathname === "/register") return null
+  if (!user || pathname === "/" || pathname === "/login" || pathname === "/register") return null
 
   const initials = user.full_name
     .split(" ")

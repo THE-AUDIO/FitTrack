@@ -35,7 +35,7 @@ const mobileNavItems = [
 export function Sidebar() {
   const pathname = usePathname()
 
-  if (pathname === "/login" || pathname === "/register") return null
+  if (pathname === "/" || pathname === "/login" || pathname === "/register") return null
 
   return (
     <>

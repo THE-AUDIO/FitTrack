@@ -2,19 +2,23 @@
 
 import { useAuthStore } from "@/store/auth-store"
 import { useRouter } from "next/navigation"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { motion } from "framer-motion"
-import { Plus, Dumbbell, Calendar, Clock, Flame, ChevronRight } from "lucide-react"
+import { Plus, Dumbbell, Calendar, Clock, Flame, Trash2 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { ConfirmDialog } from "@/components/ui/dialog"
 
 export default function WorkoutsPage() {
   const { user, isLoading } = useAuthStore()
   const router = useRouter()
+  const queryClient = useQueryClient()
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!isLoading && !user) router.push("/login")
@@ -25,6 +29,19 @@ export default function WorkoutsPage() {
     queryFn: () => apiClient("/api/workouts?limit=50"),
     enabled: !!user,
   })
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    const id = deleteTarget
+    setDeleteTarget(null)
+    setDeletingId(id)
+    try {
+      await apiClient(`/api/workouts/${id}`, { method: "DELETE" })
+      queryClient.invalidateQueries({ queryKey: ["workouts"] })
+    } catch {
+      setDeletingId(null)
+    }
+  }
 
   if (isLoading || !user) {
     return (
@@ -70,19 +87,28 @@ export default function WorkoutsPage() {
               transition={{ delay: i * 0.03 }}
             >
               <Link href={`/workouts/${w.id}`}>
-                <Card className="card-hover cursor-pointer">
+                <Card className="card-hover cursor-pointer group">
                   <CardContent className="p-5">
                     <div className="mb-3 flex items-center justify-between">
                       <Badge variant="secondary" className="text-xs">
                         <Calendar className="mr-1 h-3 w-3" />
                         {formatDate(w.date)}
                       </Badge>
-                      {w.total_calories && (
-                        <Badge variant="outline" className="text-xs">
-                          <Flame className="mr-1 h-3 w-3 text-orange-400" />
-                          {w.total_calories} kcal
-                        </Badge>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {w.total_calories && (
+                          <Badge variant="outline" className="text-xs">
+                            <Flame className="mr-1 h-3 w-3 text-orange-400" />
+                            {w.total_calories} kcal
+                          </Badge>
+                        )}
+                        <button
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteTarget(w.id) }}
+                          disabled={deletingId === w.id}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity rounded-md p-1.5 text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                     <h3 className="mb-2 font-semibold">{w.title}</h3>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -118,6 +144,17 @@ export default function WorkoutsPage() {
           </Link>
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDelete}
+        title="Supprimer la séance"
+        description="Cette action est irréversible. Tous les exercices et séries associés seront supprimés."
+        confirmLabel="Supprimer"
+        cancelLabel="Annuler"
+        variant="danger"
+      />
     </div>
   )
 }
