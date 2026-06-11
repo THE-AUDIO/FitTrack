@@ -17,20 +17,6 @@ services:
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7-alpine
-    container_name: fittrack-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   backend:
     build:
       context: ./backend
@@ -41,7 +27,6 @@ services:
       - "8001:8000"
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
@@ -55,8 +40,6 @@ services:
       PYTHONPATH: /app
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     volumes:
       - ./backend:/app
@@ -83,4 +66,3 @@ services:
 
 volumes:
   postgres-data:
-  redis-data:
