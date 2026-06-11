@@ -4,7 +4,7 @@ import { useAuthStore } from "@/store/auth-store"
 import { useRouter, useParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { motion } from "framer-motion"
+import { motion, AnimatePresence } from "framer-motion"
 import {
   ArrowLeft,
   Dumbbell,
@@ -14,6 +14,7 @@ import {
   Brain,
   Loader2,
   Trash2,
+  ChevronDown,
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -69,6 +70,16 @@ export default function WorkoutDetailPage() {
   })
 
   const [suggestion, setSuggestion] = useState<any>(null)
+  const [expandedExercises, setExpandedExercises] = useState<Set<string>>(new Set())
+
+  const toggleExercise = (id: string) => {
+    setExpandedExercises((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   if (authLoading || isLoading || !workout) {
     return (
@@ -87,7 +98,7 @@ export default function WorkoutDetailPage() {
     })
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-4xl">
+    <div className="mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
       <div className="mb-4 flex items-center justify-between">
         <Button variant="ghost" onClick={() => router.push("/workouts")}>
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -120,62 +131,83 @@ export default function WorkoutDetailPage() {
 
       <div className="mb-8 space-y-4">
         <h2 className="text-lg font-semibold">Exercices</h2>
-        {w.exercises?.map((ex: any, i: number) => (
-          <motion.div
-            key={ex.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
-          >
-            <Card>
-              <CardContent className="p-5">
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Dumbbell className="h-4 w-4 text-primary" />
-                    <h3 className="font-semibold">{ex.exercise_name}</h3>
-                    <Badge variant="secondary" className="text-xs">
-                      {ex.exercise_category}
-                    </Badge>
+          {w.exercises?.map((ex: any, i: number) => (
+            <motion.div
+              key={ex.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
+            >
+              <Card
+                className="cursor-pointer transition-colors hover:border-primary/30"
+                onClick={() => toggleExercise(ex.id)}
+              >
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Dumbbell className="h-4 w-4 text-primary" />
+                      <h3 className="font-semibold">{ex.exercise_name}</h3>
+                      <Badge variant="secondary" className="text-xs">
+                        {ex.exercise_category}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {ex.calories_burned && (
+                        <Badge variant="outline" className="text-xs">
+                          <Flame className="mr-1 h-3 w-3 text-orange-400" />
+                          {ex.calories_burned} kcal
+                        </Badge>
+                      )}
+                      <motion.div
+                        animate={{ rotate: expandedExercises.has(ex.id) ? 180 : 0 }}
+                        transition={{ duration: 0.2 }}
+                      >
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      </motion.div>
+                    </div>
                   </div>
-                  {ex.calories_burned && (
-                    <Badge variant="outline" className="text-xs">
-                      <Flame className="mr-1 h-3 w-3 text-orange-400" />
-                      {ex.calories_burned} kcal
-                    </Badge>
-                  )}
-                </div>
-                {ex.sets?.length > 0 && (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border">
-                          <th className="py-1 pr-4 text-left text-xs text-muted-foreground">Série</th>
-                          <th className="py-1 pr-4 text-left text-xs text-muted-foreground">Reps</th>
-                          <th className="py-1 pr-4 text-left text-xs text-muted-foreground">Poids</th>
-                          <th className="py-1 text-left text-xs text-muted-foreground">Durée</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {ex.sets.map((s: any) => (
-                          <tr key={s.id} className="border-b border-border/50">
-                            <td className="py-1.5 pr-4 font-medium">{s.set_number}</td>
-                            <td className="py-1.5 pr-4">{s.reps ?? "-"}</td>
-                            <td className="py-1.5 pr-4">
-                              {s.weight_kg ? `${s.weight_kg} kg` : "-"}
-                            </td>
-                            <td className="py-1.5">
-                              {s.duration_seconds ? `${s.duration_seconds}s` : "-"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
+                  <AnimatePresence>
+                    {expandedExercises.has(ex.id) && ex.sets?.length > 0 && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="mt-4 overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-border">
+                                <th className="py-1 pr-4 text-left text-xs text-muted-foreground">Série</th>
+                                <th className="py-1 pr-4 text-left text-xs text-muted-foreground">Reps</th>
+                                <th className="py-1 pr-4 text-left text-xs text-muted-foreground">Poids</th>
+                                <th className="py-1 text-left text-xs text-muted-foreground">Durée</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {ex.sets.map((s: any) => (
+                                <tr key={s.id} className="border-b border-border/50">
+                                  <td className="py-1.5 pr-4 font-medium">{s.set_number}</td>
+                                  <td className="py-1.5 pr-4">{s.reps ?? "-"}</td>
+                                  <td className="py-1.5 pr-4">
+                                    {s.weight_kg ? `${s.weight_kg} kg` : "-"}
+                                  </td>
+                                  <td className="py-1.5">
+                                    {s.duration_seconds ? `${s.duration_seconds}s` : "-"}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </CardContent>
+              </Card>
+            </motion.div>
+          ))}
       </div>
 
       <Card className="mb-8">

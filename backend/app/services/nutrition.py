@@ -1,11 +1,12 @@
 import json
+import os
 from typing import Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
-from app.models.workout import WorkoutSession
+from app.models.workout import WorkoutSession, WorkoutExercise
 from app.models.nutrition import NutritionSuggestion, SuggestionContextEnum
 
 
@@ -82,7 +83,11 @@ class NutritionService:
         user_country: str,
         user_city: Optional[str],
     ) -> NutritionSuggestion:
-        session = self.db.query(WorkoutSession).filter(WorkoutSession.id == session_id).first()
+        session = self.db.query(WorkoutSession).options(
+            joinedload(WorkoutSession.exercises).joinedload(WorkoutExercise.sets),
+            joinedload(WorkoutSession.exercises).joinedload(WorkoutExercise.exercise),
+        ).filter(WorkoutSession.id == session_id).first()
+
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 
@@ -92,18 +97,49 @@ class NutritionService:
             locale_parts.insert(0, user_city)
         locale_str = ", ".join(locale_parts)
 
-        prompt = f"""You are a fitness nutrition expert. A user just finished a workout and burned {calories} kcal.
-Location: {locale_str}
-Context: {context}
+        exercises_detail = []
+        for we in session.exercises:
+            sets_detail = []
+            for s in we.sets:
+                parts = []
+                if s.reps is not None:
+                    parts.append(f"{s.reps} reps")
+                if s.weight_kg is not None:
+                    parts.append(f"{s.weight_kg} kg")
+                if s.duration_seconds is not None:
+                    parts.append(f"{s.duration_seconds}s")
+                sets_detail.append(f"Série {s.set_number}: {', '.join(parts) if parts else 'terminé'}")
+            muscles = ", ".join(we.exercise.muscle_groups) if we.exercise.muscle_groups else "N/A"
+            exercises_detail.append(
+                f"- {we.exercise.name} ({we.exercise.category})\n"
+                f"  Muscles: {muscles} | MET: {we.exercise.met_value} | Repos: {we.rest_seconds or 0}s\n"
+                f"  Calories brûlées: {we.calories_burned or 0} kcal\n"
+                f"  Séries:\n" + "\n".join(f"    {sd}" for sd in sets_detail)
+            )
 
-Provide localized post-workout nutrition suggestions in JSON format ONLY, no other text:
-{{
-  "recovery_foods": [{{"name": "...", "reason": "..."}}],
-  "meal_plan": {{"timing": "...", "snack": "...", "meal": "..."}},
-  "hydration_tip": "..."
-}}
+        exercises_str = "\n".join(exercises_detail)
 
-Use local foods from {locale_str}. Be specific and practical."""
+        skill_path = os.path.join(os.path.dirname(__file__), "..", "..", "skills", "nutrition-suggestions", "SKILL.md")
+        skill_path = os.path.abspath(skill_path)
+        skill_content = ""
+        if os.path.exists(skill_path):
+            with open(skill_path, encoding="utf-8") as f:
+                skill_content = f.read().strip()
+
+        prompt = f"""{skill_content}
+
+# Contexte de la séance
+L'utilisateur vient de terminer une séance de sport. Voici le détail :
+
+**Informations générales**
+- Titre : {session.title}
+- Date : {session.date}
+- Durée : {session.duration_minutes} minutes
+- Calories totales brûlées : {calories} kcal
+- Localisation : {locale_str}
+
+**Exercices réalisés**
+{exercises_str}"""
 
         suggestion_json = None
         if self._gemini_client:
@@ -113,15 +149,25 @@ Use local foods from {locale_str}. Be specific and practical."""
         if suggestion_json is None:
             suggestion_json = self._fallback_suggestion(calories, locale_str)
 
-        suggestion = NutritionSuggestion(
-            session_id=session_id,
-            calories_burned=calories,
-            context=SuggestionContextEnum(context),
-            country=user_country,
-            city=user_city,
-            suggestion_json=suggestion_json,
-        )
-        self.db.add(suggestion)
+        suggestion = self.db.query(NutritionSuggestion).filter(
+            NutritionSuggestion.session_id == session_id
+        ).first()
+        if suggestion:
+            suggestion.calories_burned = calories
+            suggestion.context = SuggestionContextEnum(context)
+            suggestion.country = user_country
+            suggestion.city = user_city
+            suggestion.suggestion_json = suggestion_json
+        else:
+            suggestion = NutritionSuggestion(
+                session_id=session_id,
+                calories_burned=calories,
+                context=SuggestionContextEnum(context),
+                country=user_country,
+                city=user_city,
+                suggestion_json=suggestion_json,
+            )
+            self.db.add(suggestion)
         self.db.commit()
         self.db.refresh(suggestion)
         return suggestion

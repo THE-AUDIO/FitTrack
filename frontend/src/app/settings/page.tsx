@@ -82,7 +82,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-2xl">
+    <div className="mx-auto p-4 sm:p-6 lg:p-8 max-w-2xl">
       <div className="mb-8">
         <h1 className="text-2xl font-bold tracking-tight">Paramètres</h1>
         <p className="text-sm text-muted-foreground">

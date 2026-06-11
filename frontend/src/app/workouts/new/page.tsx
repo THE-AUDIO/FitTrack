@@ -13,11 +13,13 @@ import {
   Play,
   Pause,
   SkipForward,
+  ArrowRight,
   ChevronLeft,
   ChevronRight,
   Search,
   List,
   Flame,
+
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -85,6 +87,47 @@ export default function NewWorkoutPage() {
     queryFn: () => apiClient<Exercise[]>("/api/exercises"),
     enabled: !!user,
   })
+
+  const { data: recentWorkouts } = useQuery({
+    queryKey: ["workouts", "recent"],
+    queryFn: () => apiClient<any[]>("/api/workouts?limit=20"),
+    enabled: !!user,
+  })
+
+  const [copyingId, setCopyingId] = useState<string | null>(null)
+  const loadWorkoutTemplate = useCallback(async (workoutId: string) => {
+    setCopyingId(workoutId)
+    try {
+      const w = await apiClient<any>(`/api/workouts/${workoutId}`)
+      const exercises: PlannedExercise[] = (w.exercises || []).map((ex: any) => {
+        const match = allExercises?.find((e: Exercise) => e.id === ex.exercise_id)
+        if (!match) return null
+        const numSets = ex.sets?.length || 1
+        const restSeconds = ex.rest_seconds || 45
+        const sets = Array.from({ length: numSets }, () => ({
+          reps: null as number | null,
+          completed: false,
+        }))
+        return {
+          exercise: match,
+          numSets,
+          restSeconds,
+          sets,
+        }
+      }).filter(Boolean) as PlannedExercise[]
+
+      if (exercises.length > 0) {
+        setTitle(w.title || `Séance du ${new Date().toLocaleDateString("fr-FR")}`)
+        setDuration(w.duration_minutes || 30)
+        setPlannedExercises(exercises)
+        setPhase("select")
+      }
+    } catch {
+      showToast("Erreur lors du chargement de la séance", "error")
+    } finally {
+      setCopyingId(null)
+    }
+  }, [allExercises, showToast])
 
   const userWeight = user?.weight_kg ?? 70
 
@@ -298,7 +341,31 @@ export default function NewWorkoutPage() {
                   className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
                 />
               </div>
-              <Button onClick={() => setPhase("select")} className="w-full mt-2">
+              {recentWorkouts && recentWorkouts.length > 0 && (
+                <div className="pt-4 border-t border-border">
+                  <p className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
+                    <ArrowRight className="h-3.5 w-3.5" />
+                    Copier depuis une séance existante
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2 max-h-48 overflow-y-auto pr-1">
+                    {recentWorkouts.map((w: any) => (
+                      <button
+                        key={w.id}
+                        onClick={() => loadWorkoutTemplate(w.id)}
+                        disabled={copyingId === w.id}
+                        className="text-left rounded-lg border border-border bg-card p-3 hover:border-primary/30 hover:bg-accent transition-all disabled:opacity-50"
+                      >
+                        <p className="text-sm font-medium truncate">{w.title}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {new Date(w.date).toLocaleDateString("fr-FR")} — {w.exercise_count} ex.
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <Button onClick={() => setPhase("select")} className="w-full mt-4">
                 Ajouter des exercices
                 <ChevronRight className="ml-2 h-4 w-4" />
               </Button>

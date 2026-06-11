@@ -61,7 +61,7 @@ export default function WorkoutsPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <div className="mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl">
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Mes séances</h1>
@@ -78,7 +78,7 @@ export default function WorkoutsPage() {
       </div>
 
       {workouts && Array.isArray(workouts) && workouts.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-5 sm:grid-cols-1 md:grid-cols-2">
           {workouts.map((w: any, i: number) => (
             <motion.div
               key={w.id}
@@ -87,37 +87,39 @@ export default function WorkoutsPage() {
               transition={{ delay: i * 0.03 }}
             >
               <Link href={`/workouts/${w.id}`}>
-                <Card className="card-hover cursor-pointer group">
-                  <CardContent className="p-5">
-                    <div className="mb-3 flex items-center justify-between">
-                      <Badge variant="secondary" className="text-xs">
-                        <Calendar className="mr-1 h-3 w-3" />
-                        {formatDate(w.date)}
-                      </Badge>
-                      <div className="flex items-center gap-2">
+                <Card className="card-hover group relative h-full cursor-pointer transition-all hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5">
+                  <CardContent className="flex h-full flex-col justify-between p-6">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="truncate text-lg font-bold">{w.title}</h3>
+                        <Badge variant="secondary" className="mt-2 text-sm">
+                          <Calendar className="mr-1.5 h-3.5 w-3.5" />
+                          {formatDate(w.date)}
+                        </Badge>
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
                         {w.total_calories && (
-                          <Badge variant="outline" className="text-xs">
-                            <Flame className="mr-1 h-3 w-3 text-orange-400" />
+                          <Badge variant="outline" className="shrink-0 border-orange-500/30 px-2.5 py-1 text-sm text-orange-400">
+                            <Flame className="mr-1 h-3.5 w-3.5" />
                             {w.total_calories} kcal
                           </Badge>
                         )}
                         <button
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteTarget(w.id) }}
                           disabled={deletingId === w.id}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity rounded-md p-1.5 text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
+                          className="shrink-0 rounded-md p-1.5 text-muted-foreground opacity-0 transition-all hover:text-red-400 hover:bg-red-500/10 group-hover:opacity-100"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     </div>
-                    <h3 className="mb-2 font-semibold">{w.title}</h3>
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
+                    <div className="mt-6 flex items-center gap-4 text-sm text-muted-foreground">
+                      <span className="flex items-center gap-1.5">
+                        <Clock className="h-4 w-4" />
                         {w.duration_minutes} min
                       </span>
-                      <span className="flex items-center gap-1">
-                        <Dumbbell className="h-3 w-3" />
+                      <span className="flex items-center gap-1.5">
+                        <Dumbbell className="h-4 w-4" />
                         {w.exercise_count} exercices
                       </span>
                     </div>
