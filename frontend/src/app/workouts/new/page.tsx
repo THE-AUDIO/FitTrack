@@ -443,7 +443,7 @@ export default function NewWorkoutPage() {
             {plannedExercises.length > 0 && (
               <Button onClick={handleStartWorkout} className="w-full mt-6" size="lg">
                 <Play className="mr-2 h-4 w-4" />
-                Commencer l'entraînement
+                Commencer l&apos;entraînement
               </Button>
             )}
           </motion.div>
